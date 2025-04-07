@@ -14,7 +14,7 @@
  * @see https://github.com/orgs/ubc/repositories?type=all&q=query+loop
  */
 
-namespace UBC\CTLT\BLOCKS\QUERY_BLOCK\METADATA\SORT;
+namespace fuel\metaSort;
 
 // If this file is called directly, abort.
 if ( ! defined( 'ABSPATH' ) ) {
