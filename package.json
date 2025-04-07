@@ -29,6 +29,6 @@
   },
   "homepage": "https://github.com/ubc/ubc-whitney-into-editor#readme",
   "devDependencies": {
-    "@wordpress/scripts": "^24.5.0"
+    "@wordpress/scripts": "^30.7.0"
   }
 }

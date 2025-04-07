@@ -3,13 +3,15 @@
  *
  * Plugin Name:       WP Query Block Extension - Metadata Sort
  * Description:       Add metadata support to Query Loop Block Sort.
- * Version:           1.0
+ * Version:           2.0
  * Author:            Kelvin Xu
  * License:           GPL-2.0+
  * License URI:       http://www.gnu.org/licenses/gpl-2.0.txt
  * Text Domain:       wp-query-block-extension
  *
  * @package ubc_query_block_extension
+ * @see https://github.com/ubc/wp-query-loop-extension-metadata-sort/tree/master
+ * @see https://github.com/orgs/ubc/repositories?type=all&q=query+loop
  */
 
 namespace UBC\CTLT\BLOCKS\QUERY_BLOCK\METADATA\SORT;
@@ -19,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	die;
 }
 
-add_action( 'enqueue_block_editor_assets', __NAMESPACE__ . '\\enqueue_assets' );
+
 
 /**
  * Enqueue block assets.
@@ -27,7 +29,6 @@ add_action( 'enqueue_block_editor_assets', __NAMESPACE__ . '\\enqueue_assets' );
  * @return void
  */
 function enqueue_assets() {
-
 	wp_enqueue_script(
 		'wp-query-block-metadata-sort-js',
 		plugin_dir_url( __FILE__ ) . 'build/script.js',
@@ -43,11 +44,10 @@ function enqueue_assets() {
 			'nonce' => wp_create_nonce( 'metadata_sort_ajax' ),
 		)
 	);
-
 }//end enqueue_assets()
+add_action( 'enqueue_block_editor_assets', __NAMESPACE__ . '\\enqueue_assets' );
 
-add_filter( 'rest_post_query', __NAMESPACE__ . '\\sort_post_by_metadata', 10, 2 );
-add_filter( 'rest_page_query', __NAMESPACE__ . '\\sort_post_by_metadata', 10, 2 );
+
 
 /**
  * Add query args to post and page rest endpoint.
@@ -71,8 +71,7 @@ function sort_post_by_metadata( $args, $request ) {
 	return $args;
 }//end sort_post_by_metadata()
 
-add_filter( 'rest_post_collection_params', __NAMESPACE__ . '\\add_rest_orderby_params', 10, 1 );
-add_filter( 'rest_page_collection_params', __NAMESPACE__ . '\\add_rest_orderby_params', 10, 1 );
+
 
 /**
  * Add meta_value to the list of permitted orderby values
@@ -81,13 +80,27 @@ add_filter( 'rest_page_collection_params', __NAMESPACE__ . '\\add_rest_orderby_p
  * @return array
  */
 function add_rest_orderby_params( $params ) {
-
 	$params['orderby']['enum'][] = 'meta_value';
-
 	return $params;
 }
 
-add_filter( 'query_loop_block_query_vars', __NAMESPACE__ . '\\update_query_args', 10, 3 );
+
+
+/**
+ * Run the two functions above on all post types that have show_in_rest set to true.
+ */
+add_action( 'rest_api_init', function () {
+	$post_types = get_post_types( [ 'show_in_rest' => true ], 'objects' );
+
+	foreach ( $post_types as $post_type ) {
+		$rest_base = $post_type->rest_base ?: $post_type->name;
+
+		add_filter( "rest_{$rest_base}_query", __NAMESPACE__ . '\\sort_post_by_metadata', 10, 2 );
+		add_filter( "rest_{$rest_base}_collection_params", __NAMESPACE__ . '\\add_rest_orderby_params', 10, 1 );
+	}
+});
+
+
 
 /**
  * Update query args for blocks that inherits the main query loop block.
@@ -108,8 +121,9 @@ function update_query_args( $query, $block, $page ) {
 
 	return $query;
 }
+add_filter( 'query_loop_block_query_vars', __NAMESPACE__ . '\\update_query_args', 10, 3 );
 
-add_action( 'wp_ajax_metadata_sort_get_meta_keys', __NAMESPACE__ . '\\get_meta_keys' );
+
 
 /**
  * Ajax request handler to return the list of meta keys from the post meta table.
@@ -117,32 +131,52 @@ add_action( 'wp_ajax_metadata_sort_get_meta_keys', __NAMESPACE__ . '\\get_meta_k
  * @return void
  */
 function get_meta_keys() {
+	if ( ! wp_verify_nonce( $_POST['nonce'], 'metadata_sort_ajax' ) ) {
+		wp_send_json_error( 'Invalid nonce' );
+	}
+
 	global $wpdb;
 
-	wp_verify_nonce( $_POST['nonce'], 'metadata_sort_ajax' );
+	$post_type = sanitize_text_field( $_POST['post_type'] ?? '' );
+	if ( empty( $post_type ) ) {
+		wp_send_json_error( 'No post type provided' );
+	}
 
-	$keys = get_transient( 'wp_metadata_get_keys' );
+	// Check transient specific to post type
+	$transient_key = 'wp_metadata_get_keys_' . $post_type;
+	$keys = get_transient( $transient_key );
 	if ( false !== $keys ) {
 		wp_send_json_success( $keys );
 	}
 
+	// Get post IDs of the post type
+	$post_ids = $wpdb->get_col( $wpdb->prepare(
+		"SELECT ID FROM $wpdb->posts WHERE post_type = %s",
+		$post_type
+	) );
+
+	if ( empty( $post_ids ) ) {
+		wp_send_json_success( [] );
+	}
+
+	$post_ids_placeholders = implode(',', array_map('absint', $post_ids));
+
+	// Get distinct meta_keys for those post IDs
 	$keys = $wpdb->get_col(
-		$wpdb->prepare(
-			"SELECT DISTINCT meta_key
-			FROM $wpdb->postmeta
-			WHERE meta_key NOT BETWEEN '_' AND '_z'
-			HAVING meta_key NOT LIKE %s
-			ORDER BY meta_key",
-			$wpdb->esc_like( '_' ) . '%'
-		)
+		"SELECT DISTINCT meta_key
+		 FROM $wpdb->postmeta
+		 WHERE post_id IN ($post_ids_placeholders)
+		 AND meta_key NOT BETWEEN '_' AND '_z'
+		 AND meta_key NOT LIKE '\_%'
+		 ORDER BY meta_key"
 	);
 
-	set_transient( 'wp_metadata_get_keys', $keys, HOUR_IN_SECONDS );
-
+	set_transient( $transient_key, $keys, HOUR_IN_SECONDS );
 	wp_send_json_success( $keys );
 }//end get_meta_keys()
+add_action( 'wp_ajax_metadata_sort_get_meta_keys', __NAMESPACE__ . '\\get_meta_keys' );
 
-add_action( 'updated_post_meta', __NAMESPACE__ . '\\reset_metakeys_transient' );
+
 
 /**
  * Delete `wp_metadata_filter_get_keys` transient when any of the post metas is updated.
@@ -152,3 +186,4 @@ function reset_metakeys_transient() {
 		delete_transient( 'wp_metadata_get_keys' );
 	}
 }//end reset_metakeys_transient()
+add_action( 'updated_post_meta', __NAMESPACE__ . '\\reset_metakeys_transient' );

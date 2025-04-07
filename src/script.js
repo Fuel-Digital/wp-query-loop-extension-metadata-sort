@@ -2,7 +2,6 @@ const { createHigherOrderComponent } = wp.compose;
 const { Fragment, useEffect, useState } = wp.element;
 const { InspectorControls } = wp.blockEditor;
 const { PanelBody, ToggleControl, PanelRow, TextControl, SelectControl } = wp.components;
-const { union } = lodash;
 
 /**
  * Add additional attributes to core/post-query block.
@@ -34,7 +33,6 @@ wp.hooks.addFilter(
  * Add additional controls to core/post-template block.
  */
 const withInspectorControls = createHigherOrderComponent( ( BlockEdit ) => {
-
     return ( props ) => {
         const { name, attributes, setAttributes } = props;
         const { metaSortEnabled, query } = attributes;
@@ -45,27 +43,29 @@ const withInspectorControls = createHigherOrderComponent( ( BlockEdit ) => {
         }
 
         useEffect(() => {
-            const metaKeys = async() => {
-    
-                const data = new FormData();
-    
-                data.append( 'action', 'metadata_sort_get_meta_keys' );
-                data.append( 'nonce', wp_query_block_metadata_sort.nonce );
-            
-                const response = await fetch( ajaxurl, {
-                  method: "POST",
-                  credentials: 'same-origin',
-                  body: data
-                } );
-                const responseJson = await response.json();
-                
-                if( responseJson.success ) {
-                    setMetaKeys( responseJson.data );
-                }
-            };
-    
-            metaKeys();
-        }, []);
+			const fetchMetaKeys = async () => {
+				const postType = query?.postType || 'post'; // Fallback to 'post'
+		
+				const data = new FormData();
+				data.append('action', 'metadata_sort_get_meta_keys');
+				data.append('nonce', wp_query_block_metadata_sort.nonce);
+				data.append('post_type', postType);
+		
+				const response = await fetch(ajaxurl, {
+					method: 'POST',
+					credentials: 'same-origin',
+					body: data
+				});
+		
+				const responseJson = await response.json();
+				if (responseJson.success) {
+					setMetaKeys(responseJson.data);
+				}
+			};
+		
+			fetchMetaKeys();
+		}, [query?.postType]);
+		
 
         const disableMetaSort = () => {
             const { ['metaKey']: remove, ...rest } = query;
